@@ -11,6 +11,8 @@ def get_parse():
     parser.add_argument('-T', '--timeout', type=int, default=3, help='requests timeout')
     parser.add_argument('-D', '--disable_snapshot', action='store_true', help='disable snapshot')
     parser.add_argument('--debug', action='store_true', help='log all msg')
+    parser.add_argument('-u', '--users_file', type=str, default=None, help='file containing usernames list')
+    parser.add_argument('-P', '--passwords_file', type=str, default=None, help='file containing passwords list')
 
     args = parser.parse_args()
     return args

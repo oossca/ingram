@@ -52,13 +52,20 @@ def run():
 
     except KeyboardInterrupt:
         logger.warning('Ctrl + c was pressed')
-        p.kill()
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=5)
+            if p.is_alive():
+                p.kill()
         sys.exit()
 
     except Exception as e:
         logger.error(e)
         print(f"{color.red('error occurred, see the')} {color.yellow(config.log)} "
               f"{color.red('for more information.')}")
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=5)
         sys.exit()
 
 

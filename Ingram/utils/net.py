@@ -12,18 +12,43 @@ def get_ip_segment(start: str, end: str) -> str:
 
 def get_ip_seg_len(ip_seg: str) -> int:
     """获取一个 IP 段内的 IP 数目"""
+    # 处理URL格式，提取IP和端口
+    if ip_seg.startswith(('http://', 'https://')):
+        ip_seg = ip_seg.split('://')[1]
+    
+    # 分离IP和端口
+    if ':' in ip_seg:
+        ip_seg = ip_seg.split(':')[0]
+    
     if '-' in ip_seg or '/' in ip_seg:
-        return IPy.IP(ip_seg, make_net=True).len()
+        try:
+            return IPy.IP(ip_seg, make_net=True).len()
+        except ValueError as e:
+            # 如果IP段格式错误，返回1作为单IP处理
+            return 1
     else:
         return 1
 
 
 def get_all_ip(ip_seg: str) -> list:
     """获取一个 IP 段内的所有 IP"""
+    # 处理URL格式，提取IP和端口
+    original_ip_seg = ip_seg
+    if ip_seg.startswith(('http://', 'https://')):
+        ip_seg = ip_seg.split('://')[1]
+    
+    # 如果包含端口，保持原始格式
+    if ':' in ip_seg:
+        return [original_ip_seg]
+    
     if '-' in ip_seg or '/' in ip_seg:
-        return [i.strNormal() for i in IPy.IP(ip_seg, make_net=True)]
+        try:
+            return [i.strNormal() for i in IPy.IP(ip_seg, make_net=True)]
+        except ValueError as e:
+            # 如果IP段格式错误，返回单IP
+            return [ip_seg]
     else:
-        return [ip_seg]
+        return [original_ip_seg]
 
 
 def scrapy_useragent() -> None:

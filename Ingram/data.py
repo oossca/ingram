@@ -39,12 +39,21 @@ class Data:
         # done & found & run time
         state_file = os.path.join(self.config.out_dir, f".{self.taskid}")
         if os.path.exists(state_file):
-            with open(state_file, 'r') as f:
-                if line := f.readline().strip():
-                    _done, _found, _runned_time = line.split(',')
-                    self.done = int(_done)
-                    self.found = int(_found)
-                    self.runned_time = float(_runned_time)
+            try:
+                with open(state_file, 'r') as f:
+                    if line := f.readline().strip():
+                        parts = line.split(',')
+                        if len(parts) >= 3:
+                            _done, _found, _runned_time = parts[:3]
+                            self.done = max(0, int(_done))  # 确保非负
+                            self.found = max(0, int(_found))  # 确保非负
+                            self.runned_time = max(0.0, float(_runned_time))  # 确保非负
+                            logger.info(f"恢复状态: 已完成 {self.done} 个目标，发现 {self.found} 个漏洞")
+            except (ValueError, IOError) as e:
+                logger.warning(f"状态文件损坏，重新开始: {e}")
+                self.done = 0
+                self.found = 0
+                self.runned_time = 0.0
 
     def _cal_total(self):
         """计算目标总数"""
@@ -54,27 +63,26 @@ class Data:
                     self.add_total(net.get_ip_seg_len(strip_line))
 
     def _generate_ip(self):
-        current, remain = 0, []
+        skip_count = self.done
         with open(self.config.in_file, 'r') as f:
-            if self.done:
-                for line in f:
-                    if (strip_line := line.strip()) and not line.startswith('#'):
-                        current += net.get_ip_seg_len(strip_line)
-                        if current == self.done:
-                            break
-                        elif current < self.done:
-                            continue
-                        else:
-                            ips = net.get_all_ip(strip_line)
-                            remain = ips[(self.done - current):]
-                            break
-                for ip in remain:
-                    yield ip
-
             for line in f:
                 if (strip_line := line.strip()) and not line.startswith('#'):
-                    for ip in net.get_all_ip(strip_line):
-                        yield ip
+                    line_ips = net.get_all_ip(strip_line)
+                    if skip_count >= len(line_ips):
+                        skip_count -= len(line_ips)
+                        continue
+                    else:
+                        # 从当前行的剩余IP开始生成
+                        for ip in line_ips[skip_count:]:
+                            yield ip
+                        skip_count = 0
+
+            # 如果已经跳过了所有已处理的IP，继续生成剩余的IP
+            if skip_count == 0:
+                for line in f:
+                    if (strip_line := line.strip()) and not line.startswith('#'):
+                        for ip in net.get_all_ip(strip_line):
+                            yield ip
 
     def preprocess(self):
         """预处理"""
@@ -124,19 +132,35 @@ class Data:
             self.not_vulneralbe.writelines(','.join(item) + '\n')
             self.not_vulneralbe.flush()
 
-    def record_running_state(self):
-        # 每隔 20 个记录一下当前运行状态
-        if self.done % 20 == 0:
+    def record_running_state(self, force=False):
+        # 每隔 10 个记录一下当前运行状态，提高恢复精度
+        # 或者强制保存
+        if force or self.done % 10 == 0:
             with open(os.path.join(self.config.out_dir, f".{self.taskid}"), 'w') as f:
-                f.write(f"{str(self.done)},{str(self.found)},{self.runned_time + timer.get_time_stamp() - self.create_time}")
+                current_runtime = self.runned_time + timer.get_time_stamp() - self.create_time
+                f.write(f"{str(self.done)},{str(self.found)},{current_runtime}")
+
+    def force_save_state(self):
+        """强制保存当前状态"""
+        self.record_running_state(force=True)
 
     def __del__(self):
         try:  # if dont use try, sys.exit() may cause error
-            self.record_running_state()
-            self.vulnerable.close()
-            self.not_vulneralbe.close()
+            self.force_save_state()  # 强制保存状态
+            if hasattr(self, 'vulnerable') and self.vulnerable:
+                self.vulnerable.close()
+            if hasattr(self, 'not_vulneralbe') and self.not_vulneralbe:
+                self.not_vulneralbe.close()
         except Exception as e:
-            logger.error(e)
+            logger.error(f"清理资源时出错: {e}")
+
+    def cleanup(self):
+        """主动清理资源"""
+        self.force_save_state()
+        if hasattr(self, 'vulnerable') and self.vulnerable:
+            self.vulnerable.close()
+        if hasattr(self, 'not_vulneralbe') and self.not_vulneralbe:
+            self.not_vulneralbe.close()
 
 
 @common.singleton
@@ -148,7 +172,13 @@ class SnapshotPipeline:
         self.pipeline = Queue(self.config.th_num * 2)
         self.workers = ThreadPoolExecutor(self.config.th_num)
         self.snapshots_dir = os.path.join(self.config.out_dir, self.config.snapshots)
-        self.done = len(os.listdir(self.snapshots_dir))
+        # 确保目录存在
+        os.makedirs(self.snapshots_dir, exist_ok=True)
+        # 如果目录不存在，done设为0
+        if os.path.exists(self.snapshots_dir):
+            self.done = len([f for f in os.listdir(self.snapshots_dir) if os.path.isfile(os.path.join(self.snapshots_dir, f))])
+        else:
+            self.done = 0
         self.task_count = 0
         self.task_count_lock = Lock()
 
@@ -163,8 +193,19 @@ class SnapshotPipeline:
     def empty(self):
         return self.pipeline.empty()
 
-    def get(self):
-        return self.pipeline.get()
+    def get(self, timeout=None):
+        """获取队列中的项目，支持超时"""
+        if timeout is None:
+            return self.pipeline.get()
+        else:
+            # 使用gevent的with_timeout
+            from gevent.timeout import Timeout
+            try:
+                with Timeout(timeout, False):
+                    return self.pipeline.get()
+                return None
+            except:
+                return None
 
     def get_done(self):
         with self.var_lock:
@@ -187,8 +228,14 @@ class SnapshotPipeline:
 
     def process(self, core):
         while not core.finish():
-            exploit_func, results = self.get()
-            self.workers.submit(self._snapshot, exploit_func, results)
-            with self.task_count_lock:
-                self.task_count += 1
-            time.sleep(.1)
+            # 使用超时避免无限阻塞
+            result = self.get(timeout=0.1)
+            if result is not None:
+                exploit_func, results = result
+                self.workers.submit(self._snapshot, exploit_func, results)
+                with self.task_count_lock:
+                    self.task_count += 1
+            else:
+                # 如果队列为空或超时，短暂休眠后继续检查
+                time.sleep(0.1)
+                continue

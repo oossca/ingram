@@ -117,7 +117,10 @@ class Core:
             self.report()
 
         except KeyboardInterrupt:
-            pass
+            logger.warning('程序被用户中断，正在保存状态...')
+            self.data.cleanup()
+            logger.info('状态已保存，程序退出')
 
         except Exception as e:
-            logger.error(e)
+            logger.error(f"程序运行出错: {e}")
+            self.data.cleanup()
