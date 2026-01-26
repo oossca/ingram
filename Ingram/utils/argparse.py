@@ -13,6 +13,13 @@ def get_parse():
     parser.add_argument('--debug', action='store_true', help='log all msg')
     parser.add_argument('-u', '--users_file', type=str, default=None, help='file containing usernames list')
     parser.add_argument('-P', '--passwords_file', type=str, default=None, help='file containing passwords list')
+    
+    # FOFA相关参数
+    parser.add_argument('--fofa_email', type=str, default=None, help='FOFA account email')
+    parser.add_argument('--fofa_key', type=str, default=None, help='FOFA API key')
+    parser.add_argument('--fofa_query', type=str, default='camera', help='FOFA search query (default: camera)')
+    parser.add_argument('--fofa_max', type=int, default=1000, help='Maximum FOFA results (default: 1000)')
+    parser.add_argument('--use_fofa', action='store_true', help='Use FOFA to get targets instead of input file')
 
     args = parser.parse_args()
     return args

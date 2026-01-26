@@ -2,11 +2,11 @@
 import hashlib
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 from threading import Lock, RLock, Thread
 
 from loguru import logger
+from gevent.pool import Pool as geventPool
 
 from .utils import common
 from .utils import timer
@@ -162,6 +162,14 @@ class Data:
         if hasattr(self, 'not_vulneralbe') and self.not_vulneralbe:
             self.not_vulneralbe.close()
 
+    def shutdown_workers(self):
+        """关闭工作线程池"""
+        try:
+            if hasattr(self, 'workers') and self.workers:
+                self.workers.kill()
+        except Exception as e:
+            logger.error(f"关闭工作线程池时出错: {e}")
+
 
 @common.singleton
 class SnapshotPipeline:
@@ -169,8 +177,9 @@ class SnapshotPipeline:
     def __init__(self, config):
         self.config = config
         self.var_lock = RLock()
-        self.pipeline = Queue(self.config.th_num * 2)
-        self.workers = ThreadPoolExecutor(self.config.th_num)
+        # 限制队列大小，防止内存积压
+        self.pipeline = Queue(min(config.th_num, 100))  # 限制最大队列长度
+        self.workers = geventPool(min(config.th_num, 50))  # 限制最大工作线程数
         self.snapshots_dir = os.path.join(self.config.out_dir, self.config.snapshots)
         # 确保目录存在
         os.makedirs(self.snapshots_dir, exist_ok=True)
@@ -181,31 +190,41 @@ class SnapshotPipeline:
             self.done = 0
         self.task_count = 0
         self.task_count_lock = Lock()
+        self.running = True
+        self.processed_count = 0  # 处理计数器
 
     def put(self, msg):
         """放入一条消息
-        Queue 自代锁，且会阻塞
         params:
         - msg: (poc.exploit, results)
         """
-        self.pipeline.put(msg)
+        try:
+            # 使用非阻塞方式，避免卡住
+            self.pipeline.put_nowait(msg)
+            with self.task_count_lock:
+                self.task_count += 1
+        except:
+            # 队列满时，丢弃旧任务或跳过
+            logger.debug("快照队列已满，跳过当前快照任务")
+            pass
 
     def empty(self):
-        return self.pipeline.empty()
+        try:
+            return self.pipeline.empty()
+        except:
+            # 如果gevent队列不支持empty，返回True表示可能为空
+            return True
 
-    def get(self, timeout=None):
-        """获取队列中的项目，支持超时"""
-        if timeout is None:
-            return self.pipeline.get()
-        else:
-            # 使用gevent的with_timeout
-            from gevent.timeout import Timeout
-            try:
-                with Timeout(timeout, False):
-                    return self.pipeline.get()
-                return None
-            except:
-                return None
+    def get(self):
+        """获取队列中的项目"""
+        return self.pipeline.get()
+
+    def get_nowait(self):
+        """非阻塞获取队列中的项目"""
+        try:
+            return self.pipeline.get_nowait()
+        except:
+            raise
 
     def get_done(self):
         with self.var_lock:
@@ -227,15 +246,62 @@ class SnapshotPipeline:
             self.task_count -= 1
 
     def process(self, core):
-        while not core.finish():
-            # 使用超时避免无限阻塞
-            result = self.get(timeout=0.1)
-            if result is not None:
+        import gevent
+        
+        consecutive_empty = 0  # 连续空队列计数
+        max_consecutive_empty = 50  # 最大连续空次数
+        
+        while self.running and not core.finish():
+            try:
+                # 使用gevent的队列非阻塞获取
+                result = self.pipeline.get_nowait()
                 exploit_func, results = result
-                self.workers.submit(self._snapshot, exploit_func, results)
+                self.workers.spawn(self._snapshot, exploit_func, results)
                 with self.task_count_lock:
-                    self.task_count += 1
-            else:
-                # 如果队列为空或超时，短暂休眠后继续检查
-                time.sleep(0.1)
+                    self.processed_count += 1
+                consecutive_empty = 0  # 重置计数器
+            except:
+                # 如果队列为空，短暂休眠
+                consecutive_empty += 1
+                if consecutive_empty >= max_consecutive_empty:
+                    # 连续多次队列为空，检查是否应该退出
+                    gevent.sleep(0.5)
+                else:
+                    gevent.sleep(0.1)
                 continue
+        
+        # 处理剩余的队列任务
+        remaining_tasks = 0
+        while not self.empty():
+            try:
+                result = self.pipeline.get_nowait()
+                if result:
+                    exploit_func, results = result
+                    self.workers.spawn(self._snapshot, exploit_func, results)
+                    remaining_tasks += 1
+            except:
+                break
+        
+        if remaining_tasks > 0:
+            logger.info(f"处理剩余快照任务: {remaining_tasks}个")
+            # 等待所有任务完成，但设置超时
+            try:
+                gevent.with_timeout(30, self.workers.join)  # 30秒超时
+            except:
+                logger.warning("快照任务等待超时，强制退出")
+        
+        logger.info(f"快照处理完成，共处理 {self.processed_count} 个任务")
+        self.workers.join()
+
+    def stop(self):
+        """停止处理"""
+        self.running = False
+
+    def shutdown(self):
+        """关闭快照管道"""
+        self.stop()
+        try:
+            if hasattr(self, 'workers') and self.workers:
+                self.workers.kill()
+        except Exception as e:
+            logger.error(f"关闭快照管道时出错: {e}")

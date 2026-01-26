@@ -45,6 +45,12 @@ _config = {
     # wechat
     'wxuid': '',
     'wxtoken': '',
+    
+    # fofa
+    'fofa_email': '',
+    'fofa_key': '',
+    'fofa_query': 'camera',
+    'fofa_max_results': 1000,
 }
 
 

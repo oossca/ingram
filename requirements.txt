@@ -6,5 +6,6 @@ lxml
 ndjson
 pycryptodome
 pyOpenSSL
+psutil
 requests
 tzlocal
