@@ -1,0 +1,28 @@
+# 常见用户名列表
+# 每行一个用户名，以#开头的行为注释
+admin
+administrator
+root
+guest
+user
+operator
+manager
+supervisor
+service
+camera
+dvr
+nvr
+security
+test
+demo
+default
+system
+webadmin
+admin123
+administrator123
+root123
+support
+tech
+operator123
+view
+monitor

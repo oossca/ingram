@@ -1,0 +1,10 @@
+version: '3'
+services:
+  ingram:
+    build: .
+    container_name: ingram
+    volumes:
+      - ./targets.txt:/app/targets.txt
+      - ./out:/app/out
+    command: python run_ingram.py -i targets.txt -o out
+    restart: no

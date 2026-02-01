@@ -1,0 +1,11 @@
+colorama
+gevent
+IPy
+loguru
+lxml
+ndjson
+pycryptodome
+pyOpenSSL
+psutil
+requests
+tzlocal
