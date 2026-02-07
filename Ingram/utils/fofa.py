@@ -123,22 +123,22 @@ class FofaAPI:
             list: 摄像头目标列表
         """
         # 常见的摄像头搜索语法
-        camera_queries = [
-            query,
-            f'title="摄像头"',
-            f'body="摄像头"',
-            'app="Hikvision-Web"',
-            'app="Dahua-Web"',
-            'app="AXIS-Web"',
-            'app="Vivotek-Web"',
-            'app="Foscam-Web"',
-            'banner="Camera"',
-            'banner="webcam"',
-            'banner="DVR"'
-        ]
-
+        # camera_queries = [
+        #     query,
+        #     f'title="摄像头"',
+        #     f'body="摄像头"',
+        #     'app="Hikvision-Web"',
+        #     'app="Dahua-Web"',
+        #     'app="AXIS-Web"',
+        #     'app="Vivotek-Web"',
+        #     'app="Foscam-Web"',
+        #     'banner="Camera"',
+        #     'banner="webcam"',
+        #     'banner="DVR"'
+        # ]
+        camera_queries = query
         all_results = []
-        for camera_query in camera_queries[:3]:  # 限制查询数量
+        for camera_query in camera_queries:  # 限制查询数量
             results = self.search(camera_query, max_results // len(camera_queries))
             all_results.extend(results)
 
@@ -151,7 +151,7 @@ class FofaAPI:
                 seen_hosts.add(host)
                 unique_results.append(item)
 
-        return unique_results[:max_results]
+        return unique_results
 
     def save_to_file(self, results, output_file):
         """
@@ -205,8 +205,10 @@ def create_fofa_targets(email, key, query="camera", output_file="fofa_targets.tx
     #     results = api.search_cameras(query, max_results)
     # else:
     #     results = api.search(query, max_results)
-    results = api.search(query, max_results)
-
+    if type(query) is str:
+        results = api.search(query, max_results)
+    else:
+        results = api.search_cameras(query, max_results)
     if results:
         return api.save_to_file(results, output_file)
     else:
