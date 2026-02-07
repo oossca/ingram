@@ -43,14 +43,15 @@ def run():
             
             # 从FOFA获取目标
             print(f"{color.cyan('正在从FOFA获取目标...')}")
-            fofa_file = os.path.join(config.out_dir, "fofa_targets.txt")
+            current_path = os.path.dirname(os.path.abspath(__file__))
+            fofa_file = os.path.join(current_path, "fofa_targets.txt")
             
-            if not fofa.create_fofa_targets(
+            if  fofa.create_fofa_targets(
                 config.fofa_email, 
                 config.fofa_key, 
                 config.fofa_query, 
                 fofa_file, 
-                config.fofa_max
+                config.fofa_max_results
             ):
                 # 修改config的in_file为FOFA生成的文件
                 config = config._replace(in_file=fofa_file)

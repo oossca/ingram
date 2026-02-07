@@ -49,6 +49,7 @@ _config = {
     # rules
     'product': {},
     'rules': set(),
+    'out_dir':'out',
 
     # file & dir
     'log': 'log.txt',
@@ -63,8 +64,8 @@ _config = {
     # fofa
     'fofa_email': '',
     'fofa_key': '',
-    'fofa_query': 'camera',
-    'fofa_max_results': 1000,
+    'fofa_query': 'app="HIKVISION-视频监控" && country="CN" && city="Shenyang"',
+    'fofa_max_results': 10000,
 }
 
 

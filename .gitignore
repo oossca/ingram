@@ -99,3 +99,4 @@ dmypy.json
 # Project specific
 out/
 *.log
+fofa_targets.txt
